@@ -110,9 +110,16 @@ def main():
             st.session_state.bill_text = ""
 
         uploaded_file = st.file_uploader("Upload a bill PDF", type="pdf")
+        # In main.py, modify the Chatbot section:
         if uploaded_file:
             with st.spinner("Extracting text..."):
-                text_result = compare_extraction_methods(uploaded_file)[0]["text"]
+                # Save the uploaded file to a temporary location
+                temp_file_path = os.path.join("/tmp", uploaded_file.name)
+                with open(temp_file_path, "wb") as f:
+                    f.write(uploaded_file.getbuffer())
+
+                # Now pass the file path to the extraction function
+                text_result = compare_extraction_methods(temp_file_path)[0]["text"]
                 st.session_state.bill_text = text_result
                 st.success("Bill uploaded successfully! You can now ask questions about this bill.")
 
