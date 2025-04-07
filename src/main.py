@@ -72,7 +72,7 @@ def main():
 
     client = OpenAI(api_key=api_key) if api_key else None
 
-    mode = st.sidebar.selectbox("Choose Mode", ["Bill Chatbot", "Analyze All PDFs", "Chatbot"])
+    mode = st.sidebar.selectbox("Choose Mode", ["Chatbot", "Analyze All PDFs", "Bill Chatbot"])
 
     if mode == "Bill Chatbot":
         st.subheader("Bill Chatbot")
