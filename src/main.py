@@ -3,6 +3,8 @@ import streamlit as st
 import pandas as pd
 from dotenv import load_dotenv
 from openai import OpenAI
+
+from src.schemas import bill_extraction_schema
 from test_extractors import compare_extraction_methods
 
 load_dotenv()
@@ -11,18 +13,25 @@ load_dotenv()
 def get_bill_summary(bill_text, client, question=None):
     """Summarizes the bill or answers specific questions using OpenAI and tracks token usage."""
     try:
+        prompt = (
+            "You are a helpful assistant specialized in analyzing Romanian energy bills. "
+            "Extract all relevant billing components such as energy consumption, price per unit, taxes (TVA), "
+            "fixed charges (abonament), and any other fees. "
+            "For each item, explain how the amount was calculated (e.g. '250 kWh x 0.45 RON/kWh = 112.5 RON'). "
+            "Do not hallucinate values. If data is unclear or missing, say so. "
+        )
+
+        messages = [
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": bill_text}
+        ]
+
         if question:
-            prompt = (f"You are a helpful assistant that provides the user ONLY and ONLY with details about their bills. "
-                      f"Question: '{question}'")
-        else:
-            prompt = f"You are a helpful assistant that provides the user ONLY and ONLY with details about their bills. "
+            messages.append({"role": "user", "content": f"Question: {question}"})
 
         response = client.chat.completions.create(
             model="gpt-4-turbo",
-            messages=[
-                {"role": "system", "content": prompt},
-                {"role": "user", "content": bill_text}
-            ]
+            messages=messages
         )
         answer = response.choices[0].message.content
         token_usage = response.usage.total_tokens
@@ -63,6 +72,36 @@ def analyze_all_pdfs(client):
     return pd.DataFrame(results)
 
 
+def extract_bill_items(bill_text, client):
+    """Uses function calling to extract structured billing data."""
+    try:
+        system_message = (
+            "You are an assistant that extracts billing components and calculates totals. "
+            "Return the data in structured form using the provided function schema. "
+            "If unit prices or quantities are not available, use empty strings."
+        )
+
+        response = client.chat.completions.create(
+            model="gpt-4-turbo",
+            messages=[
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": bill_text}
+            ],
+            tools=[{"type": "function", "function": bill_extraction_schema}],
+            tool_choice="auto"
+        )
+
+        tool_calls = response.choices[0].message.tool_calls
+        if not tool_calls:
+            return []
+        args = tool_calls[0].function.arguments
+        import json
+        return json.loads(args)["items"]
+    except Exception as e:
+        return [{"label": "Error", "quantity": "", "unit_price": "", "total": str(e)}]
+
+
+
 def main():
     st.title("📄 Bill Analyzer")
 
@@ -72,7 +111,7 @@ def main():
 
     client = OpenAI(api_key=api_key) if api_key else None
 
-    mode = st.sidebar.selectbox("Choose Mode", ["Chatbot", "Analyze All PDFs", "Bill Chatbot"])
+    mode = st.sidebar.selectbox("Choose Mode", ["Chatbot"])
 
     if mode == "Bill Chatbot":
         st.subheader("Bill Chatbot")
@@ -102,7 +141,7 @@ def main():
             results_df = analyze_all_pdfs(client)
             st.dataframe(results_df)
 
-    elif mode == "Chatbot":
+    if mode == "Chatbot":
         st.subheader("💬 Chatbot")
         if "history" not in st.session_state:
             st.session_state.history = []
@@ -128,7 +167,6 @@ def main():
             if user_input:
                 st.session_state.history.append({"role": "user", "content": user_input})
 
-                # Create system message with strong guardrails
                 system_message = (
                     "You are an assistant that ONLY provides information about the uploaded E.ON energy bill. "
                     "You must REFUSE to answer ANY questions unrelated to the bill or E.ON services. "
@@ -138,12 +176,10 @@ def main():
 
                 messages = [{"role": "system", "content": system_message}]
 
-                # Add bill context if available
                 if st.session_state.bill_text:
                     messages.append(
                         {"role": "system", "content": f"Here is the bill text: {st.session_state.bill_text}"})
 
-                # Add conversation history
                 messages.extend(st.session_state.history)
 
                 response = client.chat.completions.create(
@@ -152,6 +188,16 @@ def main():
                 )
                 bot_response = response.choices[0].message.content
                 st.session_state.history.append({"role": "assistant", "content": bot_response})
+
+        if st.button("Show Bill Breakdown"):
+            with st.spinner("Extracting structured data..."):
+                breakdown = extract_bill_items(text_result, client)
+                if breakdown:
+                    st.write("### 📋 Bill Breakdown")
+                    df = pd.DataFrame(breakdown)
+                    st.dataframe(df)
+                else:
+                    st.warning("Could not extract structured bill items.")
 
         for message in st.session_state.history:
             if message["role"] == "user":
