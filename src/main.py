@@ -193,9 +193,17 @@ def main():
             with st.spinner("Extracting structured data..."):
                 breakdown = extract_bill_items(text_result, client)
                 if breakdown:
-                    st.write("### 📋 Bill Breakdown")
-                    df = pd.DataFrame(breakdown)
-                    st.dataframe(df)
+                    expected_keys = {"label", "quantity", "unit_price", "total"}
+                    valid_rows = [item for item in breakdown if
+                                  isinstance(item, dict) and expected_keys.issubset(item.keys())]
+
+                    if valid_rows:
+                        st.write("### 📋 Bill Breakdown")
+                        df = pd.DataFrame(valid_rows)
+                        st.dataframe(df)
+                    else:
+                        st.warning("Extracted items are invalid or incomplete.")
+                        st.json(breakdown)  # helpful for debugging
                 else:
                     st.warning("Could not extract structured bill items.")
 
