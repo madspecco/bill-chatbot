@@ -156,9 +156,9 @@ def main():
 
         for message in st.session_state.history:
             if message["role"] == "user":
-                st.markdown(f"🧍‍♂️ **Tu:** {message['content']}")
+                st.write(f"🧍‍♂️ **Tu:** {message['content']}")
             else:
-                st.markdown(f"🤖 **Ioana DOI:** {message['content']}")
+                st.write(f"🤖 **Ioana DOI:** {message['content']}")
 
 if __name__ == "__main__":
     main()
