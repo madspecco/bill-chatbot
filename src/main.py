@@ -1,11 +1,10 @@
 import os
 import streamlit as st
-import pandas as pd
 from dotenv import load_dotenv
 from openai import OpenAI
 
 from src.schemas import bill_extraction_schema
-from test_extractors import compare_extraction_methods
+from src.test_extractors import extract_text_with_pdfminer
 
 load_dotenv()
 
@@ -40,38 +39,6 @@ def get_bill_summary(bill_text, client, question=None):
         return f"Error: {str(e)}", 0
 
 
-def analyze_all_pdfs(client):
-    """Analyzes all PDFs and tracks token usage."""
-    data_dir = "/Users/bogdan.bolos/PycharmProjects/EONreader/src/data"
-    excluded_dirs = {"casnic", "non_casnic"}
-    pdf_files = [f for f in os.listdir(data_dir) if f.endswith(".pdf") and f not in excluded_dirs]
-
-    results = []
-    progress_bar = st.progress(0)
-    total_files = len(pdf_files)
-
-    for i, pdf in enumerate(pdf_files):
-        pdf_path = os.path.join(data_dir, pdf)
-        method_results = compare_extraction_methods(pdf_path)
-
-        for method in method_results:
-            bill_text = method.get("text", "")
-            summary, tokens_used = get_bill_summary(bill_text, client) if bill_text else ("", 0)
-
-            results.append({
-                "PDF": pdf,
-                "Method": method["method"],
-                "Tables Found": method.get("table_count", 0),
-                "Processing Time (s)": method.get("processing_time", 0),
-                "Error": method.get("error", "None"),
-                "Tokens Used": tokens_used  # Store token usage
-            })
-
-        progress_bar.progress((i + 1) / total_files)
-
-    return pd.DataFrame(results)
-
-
 def extract_bill_items(bill_text, client):
     """Uses function calling to extract structured billing data."""
     try:
@@ -101,84 +68,82 @@ def extract_bill_items(bill_text, client):
         return [{"label": "Error", "quantity": "", "unit_price": "", "total": str(e)}]
 
 
-
 def main():
-    st.title("📄 Bill Analyzer")
+    st.set_page_config(page_title="Ioana DOI – Asistent Factură", page_icon="🧾")
+    st.markdown("""
+        <style>
+            body {
+                background-color: #f9f9f9;
+                font-family: 'Segoe UI', sans-serif;
+            }
+            .block-container {
+                padding-top: 2rem;
+            }
+            .stButton>button {
+                background-color: #004a99;
+                color: white;
+                border-radius: 8px;
+                padding: 0.5em 1em;
+                font-weight: bold;
+            }
+            .stTextInput>div>div>input {
+                border-radius: 8px;
+                padding: 0.5em;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+
+    st.title("🧾 Ioana DOI – Asistentul tău pentru facturi E.ON")
 
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        st.warning("Missing API key. Set OPENAI_API_KEY in your .env file.")
-
+        st.warning("🔑 Lipsă API key. Setează `OPENAI_API_KEY` în fișierul .env.")
     client = OpenAI(api_key=api_key) if api_key else None
 
-    mode = st.sidebar.selectbox("Choose Mode", ["Chatbot"])
+    st.sidebar.title("🔧 Setări")
+    mode = st.sidebar.selectbox("Mod Asistent", ["Ioana DOI (Chatbot)"])
 
-    if mode == "Bill Chatbot":
-        st.subheader("Bill Chatbot")
-        uploaded_file = st.file_uploader("Upload a bill PDF", type="pdf")
+    if mode == "Ioana DOI (Chatbot)":
+        st.subheader("💬 Întrebări despre factura ta")
 
-        if uploaded_file:
-            with st.spinner("Extracting text..."):
-                text_result = compare_extraction_methods(uploaded_file)[0]["text"]
-
-            if text_result:
-                st.text_area("Extracted Text", text_result[:500] + "..." if len(text_result) > 500 else text_result)
-
-                if st.button("Summarize Bill"):
-                    summary, tokens_used = get_bill_summary(text_result, client)
-                    st.write(f"**Summary:** {summary}")
-                    st.write(f"**Tokens Used:** {tokens_used}")
-
-                question = st.text_input("Ask a question about the bill:")
-                if question and st.button("Ask"):
-                    response, tokens_used = get_bill_summary(text_result, client, question)
-                    st.write(f"**Response:** {response}")
-                    st.write(f"**Tokens Used:** {tokens_used}")
-
-    elif mode == "Analyze All PDFs":
-        st.subheader("📊 Analyzing All PDFs in 'data/'")
-        if st.button("Run Analysis"):
-            results_df = analyze_all_pdfs(client)
-            st.dataframe(results_df)
-
-    if mode == "Chatbot":
-        st.subheader("💬 Chatbot")
         if "history" not in st.session_state:
             st.session_state.history = []
         if "bill_text" not in st.session_state:
             st.session_state.bill_text = ""
+        if "extraction_result" not in st.session_state:
+            st.session_state.extraction_result = None
 
-        uploaded_file = st.file_uploader("Upload a bill PDF", type="pdf")
-        # In main.py, modify the Chatbot section:
+        uploaded_file = st.file_uploader("📤 Încarcă factura ta E.ON (format PDF)", type="pdf")
         if uploaded_file:
-            with st.spinner("Extracting text..."):
-                # Save the uploaded file to a temporary location
+            with st.spinner("📄 Se extrage textul din factură..."):
                 temp_file_path = os.path.join("/tmp", uploaded_file.name)
                 with open(temp_file_path, "wb") as f:
                     f.write(uploaded_file.getbuffer())
 
-                # Now pass the file path to the extraction function
-                text_result = compare_extraction_methods(temp_file_path)[0]["text"]
+                extraction_result = extract_text_with_pdfminer(temp_file_path)
+                text_result = extraction_result["text"]
                 st.session_state.bill_text = text_result
-                st.success("Bill uploaded successfully! You can now ask questions about this bill.")
+                st.session_state.extraction_result = extraction_result
+                st.success("✅ Factură încărcată cu succes! Poți pune acum întrebări.")
 
-        user_input = st.text_input("You:", key="user_input")
-        if st.button("Send"):
+        user_input = st.text_input("Tu:", key="user_input")
+        if st.button("Trimite"):
             if user_input:
                 st.session_state.history.append({"role": "user", "content": user_input})
 
                 system_message = (
-                    "You are an assistant that ONLY provides information about the uploaded E.ON energy bill. "
+                    "You are an assistant named Ioana DOI who ONLY provides information about the uploaded E.ON energy bill. "
                     "You must REFUSE to answer ANY questions unrelated to the bill or E.ON services. "
-                    "If asked about anything else, respond with: 'I can only answer questions about your E.ON bill or E.ON services. "
-                    "Please ask a question related to your bill or E.ON services.'"
+                    "If asked about anything else, respond with: 'Pot să răspund doar la întrebări legate de factura E.ON sau serviciile E.ON. "
+                    "Te rog întreabă ceva despre factura ta.'"
                 )
 
                 messages = [{"role": "system", "content": system_message}]
 
                 if st.session_state.bill_text:
                     messages.append(
-                        {"role": "system", "content": f"Here is the bill text: {st.session_state.bill_text}"})
+                        {"role": "system", "content": f"Conținutul facturii: {st.session_state.bill_text}"}
+                    )
 
                 messages.extend(st.session_state.history)
 
@@ -189,29 +154,11 @@ def main():
                 bot_response = response.choices[0].message.content
                 st.session_state.history.append({"role": "assistant", "content": bot_response})
 
-        if st.button("Show Bill Breakdown"):
-            with st.spinner("Extracting structured data..."):
-                breakdown = extract_bill_items(text_result, client)
-                if breakdown:
-                    expected_keys = {"label", "quantity", "unit_price", "total"}
-                    valid_rows = [item for item in breakdown if
-                                  isinstance(item, dict) and expected_keys.issubset(item.keys())]
-
-                    if valid_rows:
-                        st.write("### 📋 Bill Breakdown")
-                        df = pd.DataFrame(valid_rows)
-                        st.dataframe(df)
-                    else:
-                        st.warning("Extracted items are invalid or incomplete.")
-                        st.json(breakdown)  # helpful for debugging
-                else:
-                    st.warning("Could not extract structured bill items.")
-
         for message in st.session_state.history:
             if message["role"] == "user":
-                st.write(f"**You:** {message['content']}")
+                st.markdown(f"🧍‍♂️ **Tu:** {message['content']}")
             else:
-                st.write(f"**Bot:** {message['content']}")
+                st.markdown(f"🤖 **Ioana DOI:** {message['content']}")
 
 if __name__ == "__main__":
     main()
