@@ -1,4 +1,6 @@
 import os
+import re
+
 import streamlit as st
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -68,6 +70,34 @@ def extract_bill_items(bill_text, client):
         return [{"label": "Error", "quantity": "", "unit_price": "", "total": str(e)}]
 
 
+def detect_due_bills(text):
+    restant_data = []
+
+    print("=== Detectare restanță și termen ===")
+    print("Text de analizat:\n", text, "\n...")
+
+    # Format: Factura restantă <numar_factura> <data_emitere> <data_scadenta> <suma>
+    match_facturi = re.findall(r"Factură restantă (\d+)\s+(\d{2}\.\d{2}\.\d{4})\s+(\d{2}\.\d{2}\.\d{4})\s+(\d+[.,]?\d*)", text)
+    for match in match_facturi:
+        numar_factura = match[0]
+        data_scadenta = match[2]
+        suma = match[3].replace(",", ".")
+
+        print(f"✔️ Factura {numar_factura}:")
+        print(f"  - Suma restantă: {suma} RON")
+        print(f"  - Termen de plată: {data_scadenta}")
+
+        restant_data.append({
+            "numar_factura": numar_factura,
+            "suma": suma,
+            "data_scadenta": data_scadenta
+        })
+
+    print("=== Sfârșit detectare ===\n")
+    return restant_data
+
+
+
 def main():
     st.set_page_config(page_title="Ioana DOI – Asistent Factură", page_icon="🧾")
     st.markdown("""
@@ -125,6 +155,16 @@ def main():
                 st.session_state.bill_text = text_result
                 st.session_state.extraction_result = extraction_result
                 st.success("✅ Factură încărcată cu succes! Poți pune acum întrebări.")
+
+                extracted_due_bills = detect_due_bills(text_result)
+                if extracted_due_bills:
+                    for due_bill in extracted_due_bills:
+                        st.warning(f"""
+                            ⚠️ Ai un **sold restant de {due_bill['suma']} RON**, 
+                            care trebuie achitat până la **{due_bill['data_scadenta']}**,
+                            altfel riști deconectarea serviciului.
+                            ✅ Ai efectuat deja plata? Trimite confirmarea aici: [📤 Trimite confirmarea plății](#)
+                        """)
 
         user_input = st.text_input("Tu:", key="user_input")
         if st.button("Trimite"):
